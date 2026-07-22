@@ -123,16 +123,13 @@ def create_lights(scene, intensity=30.0):
         scene.add(light, pose=light_pose)
 
 def render(
-        pyrender_garm_mesh, pyrender_body_mesh, 
-        side, 
-        paths: PathCofig, 
-        render_props=None
+        pyrender_garm_mesh, pyrender_body_mesh,
+        side,
+        paths: PathCofig,
+        render_props=None,
+        renderer=None
     ):
     # print(f"PYRENDER !!!!!!!!!!!!!!!!!!!!!!!!!!1")
-    if render_props and 'resolution' in render_props:
-        view_width, view_height = render_props['resolution']
-    else:
-        view_width, view_height = 1080, 1080
     # Create a pyrender scene
     scene = pyrender.Scene(bg_color=(1., 1., 1., 0.))  # Transparent!
     
@@ -148,9 +145,6 @@ def render(
     )
 
     create_lights(scene, intensity=80.)
-
-    # Create a renderer
-    renderer = pyrender.OffscreenRenderer(viewport_width=view_width, viewport_height=view_height)
 
     # Render the scene
     color, _ = renderer.render(scene, flags=pyrender.RenderFlags.RGBA)
@@ -194,7 +188,17 @@ def render_images(paths: PathCofig, body_v, body_f, render_props):
 
     pyrender_garm_mesh, pyrender_body_mesh = load_meshes(paths, body_v, body_f)
 
-    for side in render_props['sides']:
-        render(pyrender_garm_mesh, pyrender_body_mesh, side, paths, render_props)
+    if render_props and 'resolution' in render_props:
+        view_width, view_height = render_props['resolution']
+    else:
+        view_width, view_height = 1080, 1080
+
+    # one renderer (GL context) for all sides: meshes can only bind to a single context
+    renderer = pyrender.OffscreenRenderer(viewport_width=view_width, viewport_height=view_height)
+    try:
+        for side in render_props['sides']:
+            render(pyrender_garm_mesh, pyrender_body_mesh, side, paths, render_props, renderer=renderer)
+    finally:
+        renderer.delete()
 
 

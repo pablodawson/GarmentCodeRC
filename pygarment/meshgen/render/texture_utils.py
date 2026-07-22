@@ -66,8 +66,12 @@ def _uv_connected_components(face_texture_coords):
 
     # Find connected components of face and vertex texture coords
     face_components = igl.facet_components(face_texture_coords)
-    vert_components = igl.vertex_components(face_texture_coords)
-    num_ccs = max(face_components) + 1
+    if isinstance(face_components, tuple):  # libigl>=2.6 returns (num_components, per-face ids)
+        _, face_components = face_components
+    # libigl may return (m,1) column arrays; flatten before scalar ops
+    face_components = np.asarray(face_components).ravel()
+    num_ccs = int(face_components.max()) + 1
+    vert_components = np.asarray(igl.vertex_components(face_texture_coords)).ravel()
 
     return vert_components, face_components, num_ccs
 
