@@ -101,11 +101,13 @@ class Component(BaseComponent):
             sub_raw = sub.assembly().pattern
 
             # simple merge of panels
-            spattern.pattern['panels'] = {**spattern.pattern['panels'],
-                                          **sub_raw['panels']}
+            spattern.pattern['panels'].update(sub_raw['panels'])
 
             # of stitches
             spattern.pattern['stitches'] += sub_raw['stitches']
+
+            if sub_raw.get('buttons'):
+                spattern.pattern['buttons'] = sub_raw['buttons']
 
         spattern.pattern['stitches'] += self.stitching_rules.assembly()
         return spattern   
@@ -136,12 +138,12 @@ class Component(BaseComponent):
     # Subcomponents
     def _get_subcomponents(self):
         """Unique set of subcomponents defined in the `self.subs` list or as
-        attributes of the object"""
+        attributes of the object."""
 
-        all_attrs = [getattr(self, name)
-                     for name in dir(self)
-                     if name[:2] != '__' and name[-2:] != '__']
-        return list(set([att
-                         for att in all_attrs
-                         if isinstance(att, BaseComponent)] + self.subs))
-
+        subs = {}
+        for att in vars(self).values():
+            if isinstance(att, BaseComponent):
+                subs[id(att)] = att
+        for att in self.subs:
+            subs[id(att)] = att
+        return list(subs.values())

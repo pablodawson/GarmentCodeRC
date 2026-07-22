@@ -7,6 +7,7 @@ from assets.garment_programs.skirt_paneled import *
 from assets.garment_programs.skirt_levels import *
 from assets.garment_programs.circle_skirt import *
 from assets.garment_programs.sleeves import *
+from assets.garment_programs.dress_shirt import *
 
 class TotalLengthError(BaseException):
     """Error indicating that the total length of a garment goes beyond 

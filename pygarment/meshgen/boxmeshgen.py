@@ -251,25 +251,33 @@ class Panel:
         Output:
             * (int): Index of find_list (start or end vertex) in panel.panel_vertices
         """
-        pvertices = np.array(self.panel_vertices)
+        found = self._vert_index().get(self._vert_key(find_list), ())
+        if len(found) == 1:
+            return found[0]
+        if len(found) == 0:
+            self._append_panel_vertex(find_list)
+            return len(self.panel_vertices) - 1
+        raise PatternLoadingError(
+            f'{self.__class__.__name__}::{self.panel_name}::Corner stitch '
+            'vertex has been added more than once to panel vertices!')
 
-        len_pvertices = len(pvertices)
-        if len_pvertices == 0:
-            self.panel_vertices.append(find_list)
-            return 0
+    @staticmethod
+    def _vert_key(vertex):
+        return tuple(np.asarray(vertex, dtype=float).tolist())
 
-        else:
-            index = np.where(np.all(pvertices == find_list, axis=1))
-            n_found_indices = len(index[0])
+    def _vert_index(self):
+        index = getattr(self, '_vert_idx_map', None)
+        if index is None:
+            index = {}
+            for vertex_id, vertex in enumerate(self.panel_vertices):
+                index.setdefault(self._vert_key(vertex), []).append(vertex_id)
+            self._vert_idx_map = index
+        return index
 
-            if n_found_indices == 1:  # get index
-                return index[0][0]
-            elif n_found_indices == 0:
-                self.panel_vertices.append(find_list)
-                return len(self.panel_vertices) - 1
-            else: #n_found_indices > 1
-                raise PatternLoadingError(
-                    f'{self.__class__.__name__}::{self.name}::Corner stitch vertex has been added more than once to panel vertices!')
+    def _append_panel_vertex(self, vertex):
+        self._vert_index().setdefault(self._vert_key(vertex), []).append(
+            len(self.panel_vertices))
+        self.panel_vertices.append(vertex)
 
 
     def store_edge_verts(self, edge, edge_in_vertices):
@@ -288,7 +296,7 @@ class Panel:
         end_in = begin_in + len(edge_in_vertices)  # exclusive
 
         for v in edge_in_vertices:
-            self.panel_vertices.append(v)
+            self._append_panel_vertex(v)
 
         end_index = self._get_exist_idx(end)
 
@@ -361,6 +369,7 @@ class Panel:
 
         #Store
         self.panel_vertices = keep_pts_f
+        self._vert_idx_map = None
         self.panel_faces = f
 
     def is_manifold(self, tol=1e-2):
@@ -443,7 +452,8 @@ class Edge:
 
             else:
                 raise NotImplementedError(
-                    f'{self.__class__.__name__}::{self.name}::Unknown curvature type {edge["curvature"]["type"]}')
+                    f'{self.__class__.__name__}::Unknown curvature type '
+                    f'{edge["curvature"]["type"]}')
 
         else:
             self.curve = svgpath.Line(*pat_utils.list_to_c([start, end]))
@@ -452,10 +462,11 @@ class Edge:
         res = mesh_resolution
         n_edge_verts = math.ceil(edgelength / res) + 1
 
+        self.edge_length = edgelength
         self.n_edge_verts = n_edge_verts
 
         if n_edge_verts == 2 and res > 1.0:
-            print(f'{self.__class__.__name__}::{self.name}::WARNING::Detected edge represented only by two vertices..'
+            print(f'{self.__class__.__name__}::WARNING::Detected edge represented only by two vertices..'
                   'mesh resolution might be too low. resolution = {}, edge length = {}'.format(res, edgelength))
 
 
@@ -659,7 +670,7 @@ class BoxMesh(wrappers.VisPattern):
 
                 n_0, n_1 = edge0.n_edge_verts, edge1.n_edge_verts
                 # Assign n of longer edge
-                n = n_0 if edge0.curve.length() > edge1.curve.length() else n_1
+                n = n_0 if edge0.edge_length > edge1.edge_length else n_1
                 edge0.n_edge_verts = n
                 edge1.n_edge_verts = n
                 stitch.n_verts = n
@@ -705,7 +716,7 @@ class BoxMesh(wrappers.VisPattern):
 
         if isinstance(edge.curve, svgpath.QuadraticBezier) or isinstance(edge.curve, svgpath.CubicBezier):
              # to achieve equal spread along bezier curve
-            curve_lengths = np.linspace(0,1,n) * edge.curve.length()
+            curve_lengths = np.linspace(0,1,n) * edge.edge_length
             t_vals = [edge.curve.ilength(c_len) for c_len in curve_lengths]
 
         ts = t_vals[1:(n - 1)]  # remove start and end from "inside vertices"
@@ -1178,12 +1189,22 @@ class BoxMesh(wrappers.VisPattern):
         # Check stitches validity: edge collapse (start==end)
         # NOTE: Separating checks by error type to reduce number of invalid stitch orientations to process
         # in each case
-        valid, _ = self._is_stitching_valid(
+        valid, invalid_ids = self._is_stitching_valid(
             same_panel_stitching_dict, 
             front_end_only=False)
         if not valid:
-            print(f'{self.__class__.__name__}::{self.name}::ERROR::Invalid stitching. Unable to fix')
-            raise StitchingError()
+            details = []
+            for stitch_id in invalid_ids:
+                stitch = self.stitches[stitch_id]
+                details.append(
+                    f'{stitch.panel_1}[e{stitch.edge_1}] <-> '
+                    f'{stitch.panel_2}[e{stitch.edge_2}]')
+            message = (
+                f'{self.__class__.__name__}::{self.name}::ERROR::Invalid '
+                f'stitching. Unable to fix. Collapsed stitches: {details}'
+            )
+            print(message)
+            raise StitchingError(message)
 
     # !SECTION
     # SECTION -- Mesh finalization
@@ -1457,6 +1478,7 @@ class BoxMesh(wrappers.VisPattern):
     # SECTION -- Serialization routines
     def eval_vertex_normals(self):
         vertex_normals = np.zeros((len(self.vertices), 4))
+        vertices_arr = np.asarray(self.vertices)
         for panelname in self.panelNames:
             panel = self.panels[panelname]
             n_stitches_panel = panel.n_stitches
@@ -1465,7 +1487,7 @@ class BoxMesh(wrappers.VisPattern):
                 f_glob_ids = self._get_glob_ids(panel, face)
                 loc_stitch_ids = [loc_id for loc_id in face if loc_id < n_stitches_panel]
                 if loc_stitch_ids:
-                    v0, v1, v2 = np.array(self.vertices)[f_glob_ids]
+                    v0, v1, v2 = vertices_arr[f_glob_ids]
                     face_norm = list(self.calc_norm(v0, v1, v2))
                 else:
                     face_norm = panel.norm

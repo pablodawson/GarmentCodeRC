@@ -536,9 +536,16 @@ class BasicPattern(object):
             else:
                 edge_curves.append(curve)
 
+        bboxes = [curve.bbox() for curve in edge_curves]
+        eps = 1e-3
+
         # NOTE: simple pairwise checks of edges
         for i1 in range(0, len(edge_curves)):
            for i2 in range(i1 + 1, len(edge_curves)):
+                b1, b2 = bboxes[i1], bboxes[i2]
+                if (b1[1] < b2[0] - eps or b2[1] < b1[0] - eps
+                        or b1[3] < b2[2] - eps or b2[3] < b1[2] - eps):
+                    continue
                 intersect_t = edge_curves[i1].intersect(edge_curves[i2])
                 
                 # Check exceptions -- intersection at the vertex
@@ -986,5 +993,4 @@ class ParametrizedPattern(BasicPattern):
                 self.parameters[parameter]['value'] = values
             else:  # simple 1-value parameter
                 self.parameters[parameter]['value'] = self._new_value(param_ranges)
-
 
