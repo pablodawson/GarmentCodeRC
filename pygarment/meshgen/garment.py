@@ -42,6 +42,7 @@ class Cloth:
         # collision resolution options
         self.enable_body_smoothing = config.enable_body_smoothing
         self.enable_cloth_reference_drag = config.enable_cloth_reference_drag
+        self._temporary_attachments_released = False
 
         # Build the stage -- model object, colliders, etc.
         self.build_stage(config)
@@ -262,6 +263,19 @@ class Cloth:
 
         # ------- Finalize --------------
         self.model: wp.sim.Model = builder.finalize(device = self.device) #data is transferred to warp tensors, object used in simulation
+        persistent_ranges = getattr(self, '_persistent_attachment_ranges', [])
+        if persistent_ranges:
+            post_release_stiffness = np.zeros(
+                len(builder.attachment_stiffness), dtype=np.float32)
+            source_stiffness = np.asarray(
+                builder.attachment_stiffness, dtype=np.float32)
+            for start, end in persistent_ranges:
+                post_release_stiffness[start:end] = source_stiffness[start:end]
+            self._post_release_attachment_stiffness = wp.array(
+                post_release_stiffness,
+                dtype=wp.float32,
+                device=self.device,
+            )
 
     def _add_attachment_labels(self, builder, config):
         with open(self.paths.in_body_mes, 'r') as file:
@@ -270,6 +284,7 @@ class Cloth:
             vertex_labels = yaml.load(f, Loader=yaml.SafeLoader)
         
         lables_present = False
+        self._persistent_attachment_ranges = []
         for i, attach_label in enumerate(config.attachment_labels):     
             if attach_label in vertex_labels.keys() and len(vertex_labels[attach_label]) > 0:
                 constaint_verts = vertex_labels[attach_label]
@@ -320,6 +335,74 @@ class Cloth:
                         stiffness = config.attachment_stiffness[i],
                         damping = config.attachment_damping[i]
                     )
+                elif attach_label in (
+                    'right_turn_down_collar_front',
+                    'left_turn_down_collar_front',
+                ):
+                    lables_present = True
+                    # Keep the front collar leaf below the neck and outside
+                    # the upper torso while its neckline seam settles. These
+                    # one-sided guides establish the fold without pinning an
+                    # exact shape, then release before any pose transition.
+                    neck_level = body_dict['height'] - body_dict['head_l']
+                    upper_body = self.v_body[
+                        (self.v_body[:, 1] >= neck_level - 25)
+                        & (self.v_body[:, 1] <= neck_level + 5)
+                    ]
+                    if len(upper_body) == 0:
+                        upper_body = self.v_body
+                    front_plane = float(np.max(upper_body[:, 2])) + max(
+                        float(config.body_thickness), 0.5)
+                    builder.add_attachment(
+                        constaint_verts,
+                        wp.vec3(0., neck_level + 0.5, 0.),
+                        wp.vec3(0., -1., 0.),
+                        stiffness=config.attachment_stiffness[i],
+                        damping=config.attachment_damping[i]
+                    )
+                    builder.add_attachment(
+                        constaint_verts,
+                        wp.vec3(0., 0., front_plane),
+                        wp.vec3(0., 0., 1.),
+                        stiffness=config.attachment_stiffness[i],
+                        damping=config.attachment_damping[i]
+                    )
+                    side_norm = (
+                        wp.vec3(-1., 0., 0.)
+                        if attach_label.startswith('right_')
+                        else wp.vec3(1., 0., 0.)
+                    )
+                    builder.add_attachment(
+                        constaint_verts,
+                        wp.vec3(0., 0., 0.),
+                        side_norm,
+                        stiffness=config.attachment_stiffness[i],
+                        damping=config.attachment_damping[i]
+                    )
+                elif attach_label == 'hood_back':
+                    lables_present = True
+                    # Keep the pre-folded hood behind the upper torso. Unlike
+                    # point attachments this one-sided guide remains active
+                    # after the initial placement constraints are released.
+                    neck_level = body_dict['height'] - body_dict['head_l']
+                    upper_back = self.v_body[
+                        (self.v_body[:, 1] >= neck_level - 35)
+                        & (self.v_body[:, 1] <= neck_level + 5)
+                    ]
+                    if len(upper_back) == 0:
+                        upper_back = self.v_body
+                    back_plane = float(np.min(upper_back[:, 2])) - max(
+                        float(config.body_thickness), 0.5)
+                    attachment_start = len(builder.attachment_indices)
+                    builder.add_attachment(
+                        constaint_verts,
+                        wp.vec3(0., 0., back_plane),
+                        wp.vec3(0., 0., -1.),
+                        stiffness=config.attachment_stiffness[i],
+                        damping=config.attachment_damping[i]
+                    )
+                    self._persistent_attachment_ranges.append(
+                        (attachment_start, len(builder.attachment_indices)))
                 else:
                     print(f'{self.name}::WARNING::Requested attachment label {attach_label} '
                           'is not supported. Skipped')
@@ -382,9 +465,19 @@ class Cloth:
                 self.update_smooth_body_shape()
                 if self.sim_use_graph:
                     self.create_graph()
-            if (self.model.attachment_constraint 
-                    and frame >= self.config.attachment_frames):  
-                self.model.attachment_constraint = False
+            if (self.model.attachment_constraint
+                    and not self._temporary_attachments_released
+                    and frame >= self.config.attachment_frames):
+                if hasattr(self, '_post_release_attachment_stiffness'):
+                    # Keep one-sided wear-state guides such as hood_back, but
+                    # release ordinary collar/waist positioning constraints.
+                    wp.copy(
+                        self.model.attachment_stiffness,
+                        self._post_release_attachment_stiffness,
+                    )
+                else:
+                    self.model.attachment_constraint = False
+                self._temporary_attachments_released = True
                 if self.sim_use_graph:
                     self.create_graph()
             

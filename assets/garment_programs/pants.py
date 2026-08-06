@@ -31,6 +31,7 @@ class PantPanel(pyg.Panel):
 
         # Crotch cotrols
         crotch_depth_diff =  body['crotch_hip_diff']
+        crotch_drop = design.get('crotch_drop', {'v': 0})['v']
         crotch_extention = crotch_width
 
         # eval pants shape
@@ -78,7 +79,10 @@ class PantPanel(pyg.Panel):
         )
         crotch_bottom = pyg.CurveEdgeFactory.curve_from_tangents(
             crotch_top.end,
-            [hips + crotch_extention, length - crotch_depth_diff], 
+            [
+                hips + crotch_extention,
+                length - crotch_depth_diff - crotch_drop,
+            ],
             target_tan0=np.array([0, -1]),
             target_tan1=np.array([1, 0]),
             initial_guess=[0.5, -0.5] 
@@ -309,4 +313,3 @@ class Pants(BaseBottoms):
     
     def length(self):
         return self.right.length()
-

@@ -188,7 +188,14 @@ class ShirtCollar(pyg.Component):
     with a fold-over pointed collar stitched on top. One instance per
     bodice half (front + back pieces each)."""
 
-    def __init__(self, tag, body, design) -> None:
+    def __init__(
+        self,
+        tag,
+        body,
+        design,
+        front_fold=_COLLAR_FRONT_FOLD,
+        guide_label=None,
+    ) -> None:
         super().__init__(f'ShirtCollar_{tag}')
 
         d = design['dress_shirt']
@@ -236,8 +243,14 @@ class ShirtCollar(pyg.Component):
         self.leaf_f = CollarLeafPanel(
             f'{tag}_collar_front', length_f, collar_d, point_ext=point
             ).translate_by([-length_f / 2, height_p + collar_d + 1, 14])
-        pre_fold(self.leaf_f, self.leaf_f.interfaces['bottom'].edges[0],
-                 _COLLAR_FRONT_FOLD)
+        pre_fold(
+            self.leaf_f,
+            self.leaf_f.interfaces['bottom'].edges[0],
+            front_fold,
+        )
+        if guide_label is not None:
+            self.leaf_f.interfaces['top'].edges.propagate_label(guide_label)
+            self.leaf_f.interfaces['left'].edges.propagate_label(guide_label)
 
         self.stitching_rules = pyg.Stitches(
             # stands meet at the shoulder line (the band stays continuous
@@ -459,4 +472,3 @@ class DressShirt(pyg.Component):
 
     def length(self):
         return self.right.length()
-

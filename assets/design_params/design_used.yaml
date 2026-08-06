@@ -146,6 +146,28 @@ design:
       - false
       type: bool
       default_prob: 0.75
+    hem_band:
+      enabled:
+        v: false
+        range:
+        - true
+        - false
+        type: bool
+        default_prob: 0.8
+      height:
+        v: 7.0
+        range:
+        - 3.0
+        - 12.0
+        type: float
+        default_prob: 0.7
+      gather:
+        v: 1.2
+        range:
+        - 1.0
+        - 2.0
+        type: float
+        default_prob: 0.7
   collar:
     f_collar:
       v: CircleNeckHalf
@@ -252,6 +274,7 @@ design:
         range:
         - Turtle
         - SimpleLapel
+        - TurnDownCollar
         - Hood2Panels
         - null
         type: select_null
@@ -282,6 +305,12 @@ design:
         - 1.5
         type: float
         default_prob: 0.6
+      hood_state:
+        v: up
+        range:
+        - up
+        - down
+        type: select
   sleeve:
     sleeveless:
       v: true
@@ -372,6 +401,12 @@ design:
         range:
         - 1
         - 3
+        type: float
+      opening_width:
+        v: 0
+        range:
+        - 3
+        - 25
         type: float
       cuff_len:
         v: 0.1
@@ -914,6 +949,12 @@ design:
       - 1
       type: float
       default_prob: 0.3
+    crotch_drop:
+      v: 0.0
+      range:
+      - 0
+      - 20
+      type: float
     cuff:
       type:
         v: null

@@ -59,9 +59,28 @@ def get_bounding_box_edges(mesh):
 
     return corners
 
-def create_camera(pyrender, pyrender_body_mesh, scene, side, camera_location=None):
+def create_camera(
+        pyrender, pyrender_body_mesh, scene, side, camera_location=None,
+        image_alignment=None):
 
     # Create a camera
+    if image_alignment is not None and side == 'front':
+        intrinsics = np.asarray(image_alignment['intrinsics'], dtype=float)
+        world_to_camera = np.asarray(
+            image_alignment['world_to_camera'], dtype=float)
+        camera = pyrender.IntrinsicsCamera(
+            fx=intrinsics[0, 0],
+            fy=intrinsics[1, 1],
+            cx=intrinsics[0, 2],
+            cy=intrinsics[1, 2],
+        )
+        # PromptHMR uses OpenCV camera coordinates (+Z forward, +Y down);
+        # pyrender uses OpenGL camera coordinates (-Z forward, +Y up).
+        cv_to_gl = np.diag([1.0, -1.0, -1.0, 1.0])
+        camera_pose = np.linalg.inv(cv_to_gl @ world_to_camera)
+        scene.add(camera, pose=camera_pose)
+        return
+
     y_fov = np.pi / 6. 
     camera = pyrender.PerspectiveCamera(yfov=y_fov)
     
@@ -141,7 +160,8 @@ def render(
     camera_location=render_props['front_camera_location'] if 'front_camera_location' in render_props else None
     create_camera(
         pyrender, pyrender_body_mesh, scene, side,
-        camera_location=camera_location
+        camera_location=camera_location,
+        image_alignment=render_props.get('image_alignment'),
     )
 
     create_lights(scene, intensity=80.)
@@ -200,5 +220,4 @@ def render_images(paths: PathCofig, body_v, body_f, render_props):
             render(pyrender_garm_mesh, pyrender_body_mesh, side, paths, render_props, renderer=renderer)
     finally:
         renderer.delete()
-
 

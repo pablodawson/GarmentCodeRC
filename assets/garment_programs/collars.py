@@ -265,6 +265,7 @@ class SimpleLapel(pyg.Component):
     def length(self):
         return self.interfaces['back'].edges.length()
 
+
 class HoodPanel(pyg.Panel):
     """A panel for the side of the hood"""
     def __init__(self, name, f_depth, b_depth, f_length, b_length, width, in_length, depth) -> None:
@@ -359,6 +360,21 @@ class Hood2Panels(pyg.Component):
         ).translate_by(
             [0, body['height'] - body['head_l'] + 10, 0])
 
+        if design['collar']['component'].get(
+                'hood_state', {'v': 'up'})['v'] == 'down':
+            # A hood cannot be folded down by a single rigid hinge because its
+            # curved bottom is sewn around the neckline. Start it behind the
+            # back-neck seam, then keep its free boundary behind the torso
+            # with a one-sided guide while the cloth solver forms the fold.
+            hinge = np.asarray(self.panel.point_to_3D(self.panel.edges[0].start))
+            fold = R.from_euler('X', -105, degrees=True)
+            self.panel.rotation = fold * self.panel.rotation
+            self.panel.translation = fold.apply(
+                self.panel.translation - hinge) + hinge
+            self.panel.interfaces['to_other_side'].edges.propagate_label(
+                'hood_back')
+            self.panel.edges[2].label = 'hood_back'
+
         self.interfaces.update({
             #'front': NOTE: no front interface here
             'back': self.panel.interfaces['to_other_side'],
@@ -367,4 +383,3 @@ class Hood2Panels(pyg.Component):
 
     def length(self):
         return self.panel.length()
-

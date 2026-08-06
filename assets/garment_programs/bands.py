@@ -190,6 +190,58 @@ class CuffBand(BaseBand):
         }
 
 
+class HemBand(BaseBand):
+    """Split-front rib band for a shirt or hoodie bottom.
+
+    The two front panels leave the center front open for zip/cardigan
+    construction. Closed-front garments receive one additional center seam.
+    """
+
+    def __init__(self, front_width, back_width, height, open_front=False) -> None:
+        super().__init__(body=None, design=None, tag='hem_band')
+
+        front_half = front_width / 2
+        self.front_right = StraightBandPanel(
+            'hem_band_front_right', front_half, height
+        ).translate_by([-front_half / 2, 0, 15])
+        self.front_left = StraightBandPanel(
+            'hem_band_front_left', front_half, height
+        ).translate_by([front_half / 2, 0, 15])
+        self.back = StraightBandPanel(
+            'hem_band_back', back_width, height
+        ).translate_by([0, 0, -15])
+
+        self.stitching_rules = pyg.Stitches(
+            (self.front_right.interfaces['right'], self.back.interfaces['right']),
+            (self.front_left.interfaces['left'], self.back.interfaces['left']),
+        )
+        if not open_front:
+            self.stitching_rules.append(
+                (
+                    self.front_right.interfaces['left'],
+                    self.front_left.interfaces['right'],
+                )
+            )
+
+        self.interfaces = {
+            'top_front': pyg.Interface.from_multiple(
+                self.front_right.interfaces['top'],
+                self.front_left.interfaces['top'],
+            ),
+            'top_back': self.back.interfaces['top'],
+            'top': pyg.Interface.from_multiple(
+                self.front_right.interfaces['top'],
+                self.front_left.interfaces['top'],
+                self.back.interfaces['top'],
+            ),
+            'bottom': pyg.Interface.from_multiple(
+                self.front_right.interfaces['bottom'],
+                self.front_left.interfaces['bottom'],
+                self.back.interfaces['bottom'],
+            ),
+        }
+
+
 class CuffSkirt(BaseBand):
     """A skirt-like flared cuff """
 

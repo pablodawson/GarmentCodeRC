@@ -301,9 +301,24 @@ class Sleeve(pyg.Component):
             # Class
             # Copy to avoid editing original design dict
             cdesign = deepcopy(design)
-            cuff_circ = self.interfaces['out'].edges.length() / design['cuff']['top_ruffle']['v']
-            # Ensure it fits regardless of parameters
-            cuff_circ = max(cuff_circ, body['wrist'])
+            sleeve_end_circ = self.interfaces['out'].edges.length()
+            measured_opening = design['cuff'].get(
+                'opening_width', {'v': 0})['v']
+            if measured_opening > 0:
+                # Image measurement is the laid-flat finished opening, i.e.
+                # half the cuff circumference. Unlike an ordinary woven cuff,
+                # an elastic rib cuff may have a rest circumference smaller
+                # than the wrist and stretches during dressing/simulation.
+                cuff_circ = 2 * measured_opening
+                gather = sleeve_end_circ / cuff_circ
+                self.interfaces['out'].ruffle = [
+                    dict(coeff=gather, sec=[0, len(self.interfaces['out'].edges)])
+                ]
+            else:
+                cuff_circ = (
+                    sleeve_end_circ / design['cuff']['top_ruffle']['v'])
+                # Non-measured fallback must fit without assuming elasticity.
+                cuff_circ = max(cuff_circ, body['wrist'])
             cdesign['cuff']['b_width'] = dict(v=cuff_circ)
             cdesign['cuff']['cuff_len']['v'] = cuff_len_adj
 

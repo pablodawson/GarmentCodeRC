@@ -8,6 +8,8 @@ from assets.garment_programs.base_classes import BaseBodicePanel
 from assets.garment_programs import sleeves
 from assets.garment_programs import collars
 from assets.garment_programs import tee
+from assets.garment_programs import bands
+from assets.garment_programs.closures import pre_fold
 from scipy.spatial.transform import Rotation as R
 
 class BodiceFrontHalf(BaseBodicePanel):
@@ -307,14 +309,26 @@ class BodiceHalf(pyg.Component):
         b_sleeve_int.edges.propagate_label(f'{self.name}_armhole')
     
     def add_collars(self, name, body, design):
-        # Front
-        collar_type = getattr(
-            collars, 
-            str(design['collar']['component']['style']['v']), 
-            collars.NoPanelsCollar
+        style = str(design['collar']['component']['style']['v'])
+        if style == 'TurnDownCollar':
+            # Import lazily: dress_shirt imports this module to reuse the
+            # standard sleeve/bodice helpers.
+            from assets.garment_programs.dress_shirt import ShirtCollar
+
+            collar_design = deepcopy(design)
+            self.collar_comp = ShirtCollar(
+                name,
+                body,
+                collar_design,
+                guide_label=f'{name}_turn_down_collar_front',
             )
-        
-        self.collar_comp = collar_type(name, body, design)
+        else:
+            collar_type = getattr(
+                collars,
+                style,
+                collars.NoPanelsCollar,
+            )
+            self.collar_comp = collar_type(name, body, design)
         
         # Project shape
         _, fc_interface = pyg.ops.cut_corner(
@@ -341,7 +355,14 @@ class BodiceHalf(pyg.Component):
             self.interfaces['front_in'] = pyg.Interface.from_multiple(
                 self.ftorso.interfaces['inside'], self.interfaces['front_collar']
             )
-        if 'back' in self.collar_comp.interfaces:
+        if style == 'TurnDownCollar':
+            # The continuous back fall added by Shirt holds both back stands
+            # together. A second stand-to-stand center seam would create a
+            # three-way weld and collapse the folded initial mesh.
+            self.interfaces['back_in'] = self.btorso.interfaces['inside']
+            self.interfaces['back_stand_top'] = \
+                self.collar_comp.interfaces['back_stand_top']
+        elif 'back' in self.collar_comp.interfaces:
             self.interfaces['back_collar'] = self.collar_comp.interfaces['back']
             self.interfaces['back_in'] = pyg.Interface.from_multiple(
                 self.btorso.interfaces['inside'], self.interfaces['back_collar']
@@ -432,7 +453,21 @@ class Shirt(pyg.Component):
         name_with_params = f"{self.__class__.__name__}"
         super().__init__(name_with_params)
 
-        design = self.eval_dep_params(design)
+        design = deepcopy(self.eval_dep_params(design))
+        hem_design = design['shirt'].get('hem_band', {})
+        self._hem_band_height = (
+            float(hem_design['height']['v'])
+            if hem_design.get('enabled', {}).get('v', False)
+            else 0.0
+        )
+        if self._hem_band_height and not fitted:
+            # shirt.length describes the complete garment. Reserve part of it
+            # for the added band instead of making the hoodie longer.
+            design['shirt']['length']['v'] = max(
+                0.5,
+                design['shirt']['length']['v']
+                - self._hem_band_height / body['waist_line'],
+            )
 
         self.right = BodiceHalf(f'right', body, design, fitted=fitted)
         self.left = BodiceHalf(
@@ -451,14 +486,72 @@ class Shirt(pyg.Component):
         self.stitching_rules.append((self.right.interfaces['back_in'],
                                      self.left.interfaces['back_in']))
 
-        # Adjust interface ordering for correct connectivity
-        self.interfaces = {   # Bottom connection
-            'bottom': pyg.Interface.from_multiple(
-                self.right.interfaces['f_bottom'].reverse(),
-                self.left.interfaces['f_bottom'],
-                self.left.interfaces['b_bottom'].reverse(),
-                self.right.interfaces['b_bottom'],)
-        }
+        if 'back_stand_top' in self.right.interfaces:
+            self._add_turn_down_back_fall()
+
+        # Adjust interface ordering for correct connectivity.
+        front_bottom = pyg.Interface.from_multiple(
+            self.right.interfaces['f_bottom'].reverse(),
+            self.left.interfaces['f_bottom'],
+        )
+        back_bottom = pyg.Interface.from_multiple(
+            self.left.interfaces['b_bottom'].reverse(),
+            self.right.interfaces['b_bottom'],
+        )
+        torso_bottom = pyg.Interface.from_multiple(front_bottom, back_bottom)
+        self.interfaces = {'bottom': torso_bottom}
+
+        if self._hem_band_height:
+            gather = max(1.0, float(hem_design['gather']['v']))
+            for interface in (front_bottom, back_bottom):
+                interface.ruffle = [
+                    dict(coeff=gather, sec=[0, len(interface.edges)])
+                ]
+            torso_bottom = pyg.Interface.from_multiple(front_bottom, back_bottom)
+
+            self.hem_band = bands.HemBand(
+                front_bottom.edges.length() / gather,
+                back_bottom.edges.length() / gather,
+                self._hem_band_height,
+                open_front=design['shirt'].get('openfront', {}).get('v', False),
+            )
+            self.hem_band.place_by_interface(
+                self.hem_band.interfaces['top'],
+                torso_bottom,
+                gap=2,
+                alignment='top',
+            )
+            self.stitching_rules.append(
+                (front_bottom, self.hem_band.interfaces['top_front'])
+            )
+            self.stitching_rules.append(
+                (back_bottom, self.hem_band.interfaces['top_back'])
+            )
+            self.interfaces['bottom'] = self.hem_band.interfaces['bottom']
+
+    def _add_turn_down_back_fall(self):
+        """Add one pre-folded back collar fall across both neckline halves."""
+        collar = self.right.collar_comp
+        self.back_collar_fall = bands.StraightBandPanel(
+            'collar_back',
+            2 * collar.length_b,
+            collar.collar_d,
+        )
+        self.back_collar_fall.translate_by(
+            [0, collar.stand_top_y + collar.collar_d + 1, -14]
+        )
+        pre_fold(
+            self.back_collar_fall,
+            self.back_collar_fall.interfaces['bottom'].edges[0],
+            165,
+        )
+        stand_top = pyg.Interface.from_multiple(
+            self.right.interfaces['back_stand_top'],
+            self.left.interfaces['back_stand_top'],
+        )
+        self.stitching_rules.append(
+            (self.back_collar_fall.interfaces['bottom'], stand_top)
+        )
 
     def eval_dep_params(self, design):
         # NOTE: Support for full collars with partially strapless top
@@ -482,7 +575,7 @@ class Shirt(pyg.Component):
         return design
 
     def length(self):
-        return self.right.length()
+        return self.right.length() + self._hem_band_height
 
 class FittedShirt(Shirt):
     """Creates fitted shirt
