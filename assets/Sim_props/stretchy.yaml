@@ -10,19 +10,19 @@ sim:
     non_static_percent: 1.5
 
     max_body_collisions: 35
-    max_self_collisions: 300 
+    max_self_collisions: 300
 
     zero_gravity_steps: 10
-    resolution_scale: 3.0
+    resolution_scale: 1.0
     ground: false
     material:
       garment_tri_ka: 10000.0
-      garment_edge_ke: 1.0   # Very soft fabric
+      garment_edge_ke: 1.0
       garment_tri_ke: 10000.0
-      spring_ke: 50000.0
+      spring_ke: 2500.0  # Lower stiffness allows more in-plane stretch.
       garment_edge_kd: 10.0
       garment_tri_kd: 1.0
-      spring_kd: 10.0
+      spring_kd: 7.0  # Slightly less damping preserves elastic recovery.
       fabric_density: 1.0
       fabric_thickness: 0.1
       fabric_friction: 0.5
@@ -37,25 +37,25 @@ sim:
       global_damping_effective_velocity: 0.0
       global_max_velocity: 25.0
 
-      enable_attachment_constraint: true   
-      attachment_stiffness: 
+      enable_attachment_constraint: true
+      attachment_stiffness:
       - 1000.
-      - 1000.   
-      - 1000. 
       - 1000.
-      attachment_damping: 
+      - 1000.
+      - 1000.
+      attachment_damping:
       - 10.
-      - 0.  
-      - 0. 
+      - 0.
+      - 0.
       - 0.
       attachment_frames: 400
-      attachment_label_names: 
+      attachment_label_names:
       - lower_interface
       - right_collar
       - left_collar
       - strapless_top
 
-      enable_cloth_reference_drag: true 
+      enable_cloth_reference_drag: true
       cloth_reference_margin: 0.1
       enable_body_smoothing: false
       smoothing_total_smoothing_factor: 1.0
