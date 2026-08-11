@@ -22,6 +22,11 @@ from assets.garment_programs.bands import StraightBandPanel
 from assets.garment_programs import sleeves
 from assets.garment_programs import collars
 from assets.garment_programs.closures import pre_fold
+from assets.garment_programs import tee
+from assets.garment_programs.measurement_dimensions import (
+    block as measurement_block,
+    value as measurement_value,
+)
 
 # Fold angles for the collar falls over the stand (degrees). Tuned so the
 # collar drapes down before the sim instead of standing straight up. See
@@ -43,36 +48,55 @@ class DressShirtPanel(BaseBodicePanel):
 
     def __init__(self, name, body, design, front=True) -> None:
         super().__init__(name, body, design)
+        full_design = design
         d = design['dress_shirt']
+        measured = measurement_block(design, 'measurement_shirt')
 
         ease = d['ease']['v']
         shaping = d['waist_shaping']['v']
         hem_rise = d['hem_curve']['v']
         ext = d['placket_width']['v'] if front else 0
 
-        # Fractions of the full circumference this panel covers
-        if front:
-            chest_frac = (body['bust'] - body['back_width']) / 2 / body['bust']
-            waist_frac = (body['waist'] - body['waist_back_width']) / 2 / body['waist']
-            hip_frac = (body['hips'] - body['hip_back_width']) / 2 / body['hips']
+        if measured is not None and all(
+            key in measured for key in ('front_length', 'back_width', 'chest', 'hem_width')
+        ):
+            front_bottom, back_bottom, front_top, back_top = tee._measurement_widths(
+                body, {'measurement_shirt': measured}
+            )
+            chest_w = front_top if front else back_top
+            hem_w = front_bottom if front else back_bottom
+            waist_w = chest_w
         else:
-            chest_frac = body['back_width'] / 2 / body['bust']
-            waist_frac = body['waist_back_width'] / 2 / body['waist']
-            hip_frac = body['hip_back_width'] / 2 / body['hips']
+            # Fractions of the full circumference this panel covers
+            if front:
+                chest_frac = (body['bust'] - body['back_width']) / 2 / body['bust']
+                waist_frac = (body['waist'] - body['waist_back_width']) / 2 / body['waist']
+                hip_frac = (body['hips'] - body['hip_back_width']) / 2 / body['hips']
+            else:
+                chest_frac = body['back_width'] / 2 / body['bust']
+                waist_frac = body['waist_back_width'] / 2 / body['waist']
+                hip_frac = body['hip_back_width'] / 2 / body['hips']
 
-        chest_w = chest_frac * ease * body['bust']
+            chest_w = chest_frac * ease * body['bust']
+            waist_w = pyg.utils.lin_interpolation(
+                chest_w, waist_frac * ease * body['waist'], shaping)
+            hem_w = max(hip_frac * ease * body['hips'], waist_w)
+
         self.width = chest_w
-        # Waist suppression: 0 keeps the boxy chest width, 1 follows the body
-        waist_w = pyg.utils.lin_interpolation(
-            chest_w, waist_frac * ease * body['waist'], shaping)
-        # The skirt of the shirt must clear the hips regardless of shaping
-        hem_w = max(hip_frac * ease * body['hips'], waist_w)
 
         sh_tan = np.tan(np.deg2rad(body['_shoulder_incl']))
         shoulder_incl = sh_tan * chest_w
 
-        length = d['length']['v'] * body['waist_line']
-        if front:
+        if measured is not None and 'front_length' in measured:
+            neck_half = measurement_value(
+                full_design, 'measurement_shirt', 'neck_width', 0.0
+            ) / 2
+            length = measurement_value(
+                full_design, 'measurement_shirt', 'front_length', 5.0
+            ) - sh_tan * (chest_w - neck_half)
+        else:
+            length = d['length']['v'] * body['waist_line']
+        if front and measured is None:
             # Adjusted for shoulder inclination for correct sleeve fitting
             # (same as the T-shirt block)
             fb_diff = (chest_frac - (0.5 - chest_frac)) * body['bust']
@@ -298,11 +322,17 @@ class DressShirtHalf(pyg.Component):
         }
 
         # Sleeve opening size (same mechanics as BodiceHalf)
-        max_cwidth = self.ftorso.interfaces['shoulder_corner'].edges[0].length() - 1
-        min_cwidth = body['_armscye_depth']
-        v = design['sleeve']['connecting_width']['v']
-        design['sleeve']['connecting_width']['v'] = min(
-            min_cwidth + min_cwidth * v, max_cwidth)
+        measured = measurement_block(design, 'measurement_shirt')
+        if measured is not None and 'sleeve_width' in measured:
+            design['sleeve']['connecting_width']['v'] = measurement_value(
+                design, 'measurement_shirt', 'sleeve_width'
+            )
+        else:
+            max_cwidth = self.ftorso.interfaces['shoulder_corner'].edges[0].length() - 1
+            min_cwidth = body['_armscye_depth']
+            v = design['sleeve']['connecting_width']['v']
+            design['sleeve']['connecting_width']['v'] = min(
+                min_cwidth + min_cwidth * v, max_cwidth)
 
         self.add_sleeves(name, body, design)
         self.add_collar(name, body, design)

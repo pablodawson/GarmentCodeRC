@@ -5,6 +5,12 @@ import pygarment as pyg
 from assets.garment_programs.base_classes import StackableSkirtComponent
 from assets.garment_programs.base_classes import BaseBottoms
 from assets.garment_programs import shapes
+from assets.garment_programs.measurement_dimensions import (
+    block as measurement_block,
+    value as measurement_value,
+    set_total,
+    with_lower_measurements,
+)
 
 
 class SkirtPanel(pyg.Panel):
@@ -306,6 +312,9 @@ class FittedSkirtPanel(pyg.Panel):
 # Full garments - Components
 class PencilSkirt(StackableSkirtComponent):
     def __init__(self, body, design, tag='', length=None, rise=None, slit=True, **kwargs) -> None:
+        full_design = design
+        measured = measurement_block(design, 'measurement_skirt')
+        body = with_lower_measurements(body, design, 'measurement_skirt')
         super().__init__(body, design, tag)
 
         design = design['pencil-skirt']
@@ -324,10 +333,17 @@ class PencilSkirt(StackableSkirtComponent):
             style_shape_l, style_shape_r = None, None
 
         # Force from arguments if given
-        self.rise = design['rise']['v'] if rise is None else rise
+        self.rise = 1.0 if measured is not None else (
+            design['rise']['v'] if rise is None else rise
+        )
         waist, hips_depth, back_waist = self.eval_rise(self.rise)
         if length is None:
-            length = design['length']['v'] * body['_leg_length']  # Depends on leg length
+            if measured is not None:
+                length = measurement_value(
+                    full_design, 'measurement_skirt', 'full_length', 5.0
+                ) - hips_depth
+            else:
+                length = design['length']['v'] * body['_leg_length']  # Depends on leg length
         else:
             length = length - hips_depth
 
@@ -394,16 +410,46 @@ class PencilSkirt(StackableSkirtComponent):
 class Skirt2(StackableSkirtComponent):
     """Simple 2 panel skirt"""
     def __init__(self, body, design, tag='', length=None, rise=None, slit=True, top_ruffles=True, min_len=5) -> None:
+        full_design = design
+        measured = measurement_block(design, 'measurement_skirt')
+        body = with_lower_measurements(body, design, 'measurement_skirt')
         super().__init__(body, design, tag)
 
         design = design['skirt']
+        if measured is not None:
+            target_waist = measurement_value(
+                full_design, 'measurement_skirt', 'waist', None
+            )
+            target_hips = measurement_value(
+                full_design, 'measurement_skirt', 'hips', None
+            )
+            front_fraction = 1 - body['waist_back_width'] / body['waist']
+            ruffles = design['ruffle']['v'] if top_ruffles else 1.0
+            if target_waist is not None:
+                set_total(
+                    body, 'waist', 'waist_back_width',
+                    target_waist / max(2 * front_fraction * ruffles, 1e-6),
+                )
+            if target_hips is not None and target_waist is not None:
+                # SkirtPanel adds ``flare`` at the hem; the measurement
+                # sampler intersects it at 75% of the panel height.
+                design['flare']['v'] = max(
+                    0.0, target_hips - target_waist
+                )
 
-        self.rise = design['rise']['v'] if rise is None else rise
+        self.rise = 1.0 if measured is not None else (
+            design['rise']['v'] if rise is None else rise
+        )
         waist, hip_line, back_waist = self.eval_rise(self.rise)
 
         # Force from arguments if given
         if length is None:
-            length = hip_line + design['length']['v'] * body['_leg_length']  # Depends on leg length
+            if measured is not None:
+                length = measurement_value(
+                    full_design, 'measurement_skirt', 'full_length', min_len
+                )
+            else:
+                length = hip_line + design['length']['v'] * body['_leg_length']  # Depends on leg length
 
         # NOTE: with some combinations of rise and length parameters length may become too small/negative
         # Hence putting a min positive value here
@@ -455,23 +501,57 @@ class SkirtManyPanels(BaseBottoms):
     """Round Skirt with many panels"""
 
     def __init__(self, body, design, tag='', rise=None, min_len=5) -> None:
+        full_design = design
+        measured = measurement_block(design, 'measurement_skirt')
+        body = with_lower_measurements(body, design, 'measurement_skirt')
         tag_extra = str(design['flare-skirt']['skirt-many-panels']['n_panels']['v'])
         tag = f'{tag}_{tag_extra}' if tag else tag_extra 
         super().__init__(body, design, tag=tag, rise=rise)
 
         design = design['flare-skirt']
-        self.rise = design['rise']['v'] if rise is None else rise
+        if measured is not None:
+            target_waist = measurement_value(
+                full_design, 'measurement_skirt', 'waist', None
+            )
+            n_panels = design['skirt-many-panels']['n_panels']['v']
+            if target_waist is not None:
+                set_total(
+                    body, 'waist', 'waist_back_width', target_waist * n_panels / 2,
+                )
+        self.rise = 1.0 if measured is not None else (
+            design['rise']['v'] if rise is None else rise
+        )
         waist, hip_line, _ = self.eval_rise(self.rise)
         n_panels = design['skirt-many-panels']['n_panels']['v']
 
         # Length is dependent on length of legs
-        length = hip_line + design['length']['v'] * body['_leg_length']
+        if measured is not None:
+            length = measurement_value(
+                full_design, 'measurement_skirt', 'full_length', min_len
+            )
+        else:
+            length = hip_line + design['length']['v'] * body['_leg_length']
 
         # NOTE: with some combinations of rise and length parameters, length may become too small/negative
         # Hence putting a min positive value here
         length = max(length, min_len)
 
         flare_coeff_pi = 1 + design['suns']['v'] * length * 2 * np.pi / waist
+        if measured is not None:
+            target_hips = measurement_value(
+                full_design, 'measurement_skirt', 'hips', None
+            )
+            target_waist = measurement_value(
+                full_design, 'measurement_skirt', 'waist', None
+            )
+            if target_hips is not None and target_waist is not None:
+                height_fraction = 1 - 0.78
+                flare_coeff_pi = 1 + (
+                    (target_hips / target_waist - 1) / height_fraction
+                )
+                design['suns']['v'] = (
+                    (flare_coeff_pi - 1) * waist / (length * 2 * np.pi)
+                )
 
         self.front = ThinSkirtPanel('front', 
                                     panel_w := waist / n_panels,
@@ -509,4 +589,3 @@ class SkirtManyPanels(BaseBottoms):
     
     def length(self):
         return self.front.length()
-

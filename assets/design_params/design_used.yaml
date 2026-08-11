@@ -5,6 +5,7 @@ design:
       range:
       - FittedShirt
       - Shirt
+      - MeasurementShirt
       - DressShirt
       - null
       type: select_null

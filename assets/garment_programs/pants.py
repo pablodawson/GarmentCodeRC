@@ -4,6 +4,11 @@ import numpy as np
 import pygarment as pyg
 from assets.garment_programs.base_classes import BaseBottoms
 from assets.garment_programs import bands
+from assets.garment_programs.measurement_dimensions import (
+    block as measurement_block,
+    value as measurement_value,
+    with_lower_measurements,
+)
 
 
 class PantPanel(pyg.Panel):
@@ -17,13 +22,16 @@ class PantPanel(pyg.Panel):
             dart_position,
             match_top_int_to=None,
             hipline_ext=1,
-            double_dart=False) -> None:
+            double_dart=False,
+            bottom_width=None) -> None:
         """
             Basic pant panel with option to be fitted (with darts)
         """
         super().__init__(name)
 
-        flare = body['leg_circ'] * (design['flare']['v']  - 1) / 4 
+        flare = body['leg_circ'] * (design['flare']['v']  - 1) / 4
+        opening_left = -float(bottom_width) / 2 if bottom_width is not None else -flare
+        opening_right = float(bottom_width) / 2 if bottom_width is not None else None
         hips_depth = hips_depth * hipline_ext
 
         hip_side_incl = np.deg2rad(body['_hip_inclination'])
@@ -49,12 +57,12 @@ class PantPanel(pyg.Panel):
         # Right
         if pyg.utils.close_enough(design['flare']['v'], 1):  # skip optimization
             right_bottom = pyg.Edge(    
-                [-flare, 0], 
+                [opening_left, 0],
                 [0, length]
             )
         else:
             right_bottom = pyg.CurveEdgeFactory.curve_from_tangents(
-                [-flare, 0], 
+                [opening_left, 0],
                 [0, length],
                 target_tan1=np.array([0, 1]), 
                 # initial guess places control point closer to the hips 
@@ -95,7 +103,7 @@ class PantPanel(pyg.Panel):
                 #   just a little behing the crotch point
                 # NOTE: Ensuring same distance from the crotch point in both 
                 #   front and back for matching curves
-                crotch_bottom.end[0] - 2 + flare, 
+                opening_right if opening_right is not None else crotch_bottom.end[0] - 2 + flare,
                 # NOTE: The inside edge either matches the length of the outside (0, normal case)
                 # or when the inteded length is smaller than crotch depth,
                 # inside edge covers of the inside leg a bit below the crotch (panties-like shorts)
@@ -182,10 +190,45 @@ class PantPanel(pyg.Panel):
 
 class PantsHalf(BaseBottoms):
     def __init__(self, tag, body, design, rise=None) -> None:
+        full_design = design
+        measured = measurement_block(design, 'measurement_pants')
+        body = with_lower_measurements(body, design, 'measurement_pants')
+        if measured is not None:
+            # ``measure_pants`` reports the flat front of both mirrored
+            # half-panels, while construction body values are circumferences.
+            for key in ('waist', 'hips'):
+                target = measurement_value(full_design, 'measurement_pants', key)
+                if target is not None:
+                    back_key = 'waist_back_width' if key == 'waist' else 'hip_back_width'
+                    back_fraction = float(body[back_key]) / float(body[key])
+                    # One measured pant front corresponds to a little under
+                    # half of the complete body circumference after the
+                    # dart/side-seam construction is opened.
+                    body.params[key] = 1.8 * target
+                    body.params[back_key] = body.params[key] * back_fraction
         super().__init__(body, design, tag, rise=rise)
         design = design['pants']
-        self.rise = design['rise']['v'] if rise is None else rise
+        self.rise = 1.0 if measured is not None else (
+            design['rise']['v'] if rise is None else rise
+        )
         waist, hips_depth, waist_back = self.eval_rise(self.rise)
+
+        if measured is not None:
+            measured_rise = measurement_value(
+                full_design, 'measurement_pants', 'front_rise', None
+            )
+            if measured_rise is not None:
+                hips_depth = max(
+                    0.1,
+                    measured_rise - body['crotch_hip_diff'],
+                )
+            design = deepcopy(design)
+            design['crotch_drop']['v'] = 0.0
+            opening_width = measurement_value(
+                full_design, 'measurement_pants', 'leg_opening_width', None
+            )
+        else:
+            opening_width = None
 
         # NOTE: min value = full sum > leg curcumference
         # Max: pant leg falls flat from the back
@@ -197,7 +240,16 @@ class PantsHalf(BaseBottoms):
         front_extention = front_hip / 4    # From pattern making book
         back_extention = crotch_extention - front_extention
 
-        length, cuff_len = design['length']['v'], design['cuff']['cuff_len']['v']
+        if measured is not None:
+            length = max(
+                5.0,
+                measurement_value(
+                    full_design, 'measurement_pants', 'full_length', 5.0,
+                ) - hips_depth,
+            )
+            cuff_len = 0.0
+        else:
+            length, cuff_len = design['length']['v'], design['cuff']['cuff_len']['v']
         if design['cuff']['type']['v']: 
             if length - cuff_len < design['length']['range'][0]:   # Min length from paramss
                 # Cannot be longer then a pant
@@ -206,8 +258,9 @@ class PantsHalf(BaseBottoms):
             # unless the requested length is too short to fit the cuff 
             # (to avoid negative length)
             length -= cuff_len
-        length *= body['_leg_length']
-        cuff_len *= body['_leg_length']
+        if measured is None:
+            length *= body['_leg_length']
+            cuff_len *= body['_leg_length']
 
         self.front = PantPanel(
             f'pant_f_{tag}', body, design,
@@ -217,7 +270,8 @@ class PantsHalf(BaseBottoms):
             hips_depth=hips_depth,
             dart_position = body['bust_points'] / 2,
             crotch_width=front_extention,
-            match_top_int_to=(body['waist'] - body['waist_back_width']) / 2
+            match_top_int_to=(body['waist'] - body['waist_back_width']) / 2,
+            bottom_width=opening_width,
             ).translate_by([0, body['_waist_level'] - 5, 25])
         self.back = PantPanel(
             f'pant_b_{tag}', body, design,
@@ -229,7 +283,8 @@ class PantsHalf(BaseBottoms):
             dart_position = body['bum_points'] / 2,
             crotch_width=back_extention,
             match_top_int_to=body['waist_back_width'] / 2,
-            double_dart=True
+            double_dart=True,
+            bottom_width=opening_width
             ).translate_by([0, body['_waist_level'] - 5, -20])
 
         self.stitching_rules = pyg.Stitches(

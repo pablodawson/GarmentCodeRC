@@ -2,6 +2,12 @@ import numpy as np
 import pygarment as pyg
 
 from assets.garment_programs.base_classes import StackableSkirtComponent
+from assets.garment_programs.measurement_dimensions import (
+    block as measurement_block,
+    value as measurement_value,
+    set_total,
+    with_lower_measurements,
+)
 
 
 class CircleArcPanel(pyg.Panel):
@@ -128,15 +134,41 @@ class AsymHalfCirclePanel(pyg.Panel):
 class SkirtCircle(StackableSkirtComponent):
     """Simple circle skirt"""
     def __init__(self, body, design, tag='', length=None, rise=None, slit=True, asymm=False, min_len=5, **kwargs) -> None:
+        full_design = design
+        measured = measurement_block(design, 'measurement_skirt')
+        body = with_lower_measurements(body, design, 'measurement_skirt')
         super().__init__(body, design, tag)
 
         design = design['flare-skirt']
         suns = design['suns']['v']
-        self.rise = design['rise']['v'] if rise is None else rise
+        if measured is not None:
+            arc = suns * np.pi
+            waist_factor = 2 * np.sin(arc / 2) / max(arc, 1e-6)
+            target_waist = measurement_value(
+                full_design, 'measurement_skirt', 'waist', None
+            )
+            if target_waist is not None:
+                set_total(
+                    body, 'waist', 'waist_back_width',
+                    target_waist / max(waist_factor, 1e-6),
+                )
+        self.rise = 1.0 if measured is not None else (
+            design['rise']['v'] if rise is None else rise
+        )
         waist, hips_depth, _ = self.eval_rise(self.rise)
 
         if length is None:  # take from design parameters
-            length = hips_depth + design['length']['v'] * body['_leg_length']
+            if measured is not None:
+                target_length = measurement_value(
+                    full_design, 'measurement_skirt', 'full_length', min_len
+                )
+                if asymm:
+                    length = target_length
+                else:
+                    half_arc = design['suns']['v'] * np.pi / 2
+                    length = target_length / max(np.cos(half_arc), 1e-3)
+            else:
+                length = hips_depth + design['length']['v'] * body['_leg_length']
 
         # NOTE: with some combinations of rise and length parameters length may become too small/negative
         # Hence putting a min positive value here

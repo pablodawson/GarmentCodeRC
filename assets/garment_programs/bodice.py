@@ -221,6 +221,27 @@ class BodiceHalf(pyg.Component):
 
     def eval_dep_params(self, body, design):
 
+        measured = design.get('measurement_shirt')
+        if measured is not None:
+            def value(key):
+                node = measured[key]
+                return float(node['v'] if isinstance(node, dict) else node)
+
+            # These are centimetre-valued projections for MeasurementShirt,
+            # rather than normalized controls requiring body-based remapping.
+            if not design['sleeve']['sleeveless']['v']:
+                design['sleeve']['connecting_width']['v'] = value('sleeve_width')
+            design['collar']['width']['v'] = value('neck_width')
+            design['collar']['fc_depth']['v'] = value('collar_height')
+            design['collar']['bc_depth']['v'] = min(
+                max(
+                    0.01,
+                    design['collar']['bc_depth']['v'] * body['_bust_line'],
+                ),
+                value('collar_height'),
+            )
+            return
+
         # Sleeves
         # NOTE assuming the vertical side is the first argument
         max_cwidth = self.ftorso.interfaces['shoulder_corner'].edges[0].length() - 1  # cm
@@ -588,3 +609,23 @@ class FittedShirt(Shirt):
     """
     def __init__(self, body, design) -> None:
         super().__init__(body, design, fitted=True)
+
+
+class MeasurementShirt(Shirt):
+    """Shirt whose size-bearing inputs are flat measurements in centimetres."""
+
+    def __init__(self, body, design) -> None:
+        required = {
+            'front_length', 'back_width', 'chest', 'hem_width',
+            'neck_width', 'collar_height',
+        }
+        if not design['sleeve']['sleeveless']['v']:
+            required.update({
+                'sleeve_length', 'sleeve_width', 'sleeve_cuff_width',
+            })
+        missing = required - set(design.get('measurement_shirt', {}))
+        if missing:
+            raise ValueError(
+                'MeasurementShirt is missing: ' + ', '.join(sorted(missing))
+            )
+        super().__init__(body, design, fitted=False)

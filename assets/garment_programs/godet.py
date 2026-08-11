@@ -5,6 +5,7 @@ import pygarment as pyg
 
 from assets.garment_programs.base_classes import BaseBottoms
 from assets.garment_programs import skirt_paneled as skirts
+from assets.garment_programs.measurement_dimensions import with_lower_measurements
 
 
 class Insert(pyg.Panel):
@@ -26,6 +27,7 @@ class Insert(pyg.Panel):
 class GodetSkirt(BaseBottoms):
 
     def __init__(self, body, design, rise=None) -> None:
+        body = with_lower_measurements(body, design, 'measurement_skirt')
         super().__init__(body, design, rise=rise)
 
         gdesign = design['godet-skirt']

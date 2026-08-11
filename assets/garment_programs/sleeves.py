@@ -118,13 +118,21 @@ class SleevePanel(pyg.Panel):
         rest_angle = max(np.deg2rad(design['sleeve_angle']['v']),
                          shoulder_angle)
         standing = design['standing_shoulder']['v']
+        measured = design.get('measurements')
+
+        def measured_value(key):
+            node = measured[key]
+            return float(node['v'] if isinstance(node, dict) else node)
 
         # Calculating extension size & end size before applying ruffles
         # Since ruffles add to pattern length & width, but not to de-facto 
         # sleeve length in 3D
-        end_width = design['end_width']['v'] * abs(open_shape[0].start[1] - open_shape[-1].end[1]) 
-        # Ensure it fits regardless of parameters
-        end_width = max(end_width, body['wrist'] / 2)
+        if measured is not None:
+            end_width = measured_value('sleeve_cuff_width')
+        else:
+            end_width = design['end_width']['v'] * abs(open_shape[0].start[1] - open_shape[-1].end[1])
+            # Ensure it fits regardless of parameters
+            end_width = max(end_width, body['wrist'] / 2)
 
         # Ruffles at opening
         if not pyg.utils.close_enough(design['connect_ruffle']['v'], 1):
@@ -134,7 +142,10 @@ class SleevePanel(pyg.Panel):
         opening_length = abs(open_shape[0].start[0] - open_shape[-1].end[0])
         arm_width = abs(open_shape[0].start[1] - open_shape[-1].end[1])
         # Length from the border of the opening to the end of the sleeve
-        length = design['length']['v'] * (body['arm_length'] - opening_length)
+        if measured is not None:
+            length = measured_value('sleeve_length') - opening_length
+        else:
+            length = design['length']['v'] * (body['arm_length'] - opening_length)
         # NOTE: Asked to reduce by too much: reduce as much as possible
         length = max(length + length_shift, MIN_LENGTH)
 
@@ -208,11 +219,24 @@ class Sleeve(pyg.Component):
         """
         super().__init__(f'{self.__class__.__name__}_{tag}')
 
-        design = design['sleeve']
+        measurements = design.get('measurement_shirt')
+        design = deepcopy(design['sleeve'])
+        if measurements is not None:
+            design['measurements'] = measurements
         self.design = design
         self.body = body
         
-        sleeve_balance = body['_base_sleeve_balance'] / 2
+        if measurements is not None:
+            back_width = measurements['back_width']
+            if isinstance(back_width, dict):
+                back_width = back_width['v']
+            # In a measured Shirt the retained shoulder/upper-back span is a
+            # garment input, rather than being pinned to the body's balance.
+            # Keep a small shoulder projection so cut_corner never degenerates
+            # into a zero-length cut at the panel vertex.
+            sleeve_balance = float(back_width) / 2 - 0.5
+        else:
+            sleeve_balance = body['_base_sleeve_balance'] / 2
 
         rest_angle = max(np.deg2rad(design['sleeve_angle']['v']),
                          np.deg2rad(body['_shoulder_incl']))

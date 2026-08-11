@@ -1,24 +1,33 @@
 from assets.garment_programs.circle_skirt import *
 from assets.garment_programs.skirt_paneled import *
 from copy import deepcopy
+from assets.garment_programs.measurement_dimensions import (
+    block as measurement_block,
+    value as measurement_value,
+    with_lower_measurements,
+)
 
 
 class SkirtLevels(BaseBottoms):
     """Skirt constiting of multuple stitched skirts"""
 
     def __init__(self, body, design, rise=None) -> None:
+        measured = measurement_block(design, 'measurement_skirt')
+        body = with_lower_measurements(body, design, 'measurement_skirt')
         super().__init__(body, design, rise=rise)
 
         ldesign = design['levels-skirt']
         lbody = deepcopy(body)  # We will modify the values, so need a copy
         n_levels = ldesign['num_levels']['v']
         ruffle = ldesign['level_ruffle']['v']
+        self.rise = 1.0 if measured is not None else (
+            ldesign['rise']['v'] if rise is None else rise
+        )
 
         # Adjust length to the common denominators
         self.eval_length(ldesign, body)
         
         # Definitions
-        self.rise = ldesign['rise']['v'] if rise is None else rise
         base_skirt_class = globals()[ldesign['base']['v']]
         self.subs.append(base_skirt_class(
             body, 
@@ -71,10 +80,18 @@ class SkirtLevels(BaseBottoms):
     def eval_length(self, ldesign, body):
         
         # With convertion to absolute values
-        total_length = ldesign['length']['v'] * body['_leg_length']
+        measured = measurement_block(self.design, 'measurement_skirt')
+        if measured is not None:
+            rise = self.rise
+            total_length = measurement_value(
+                self.design, 'measurement_skirt', 'full_length', 5.0
+            ) - body['hips_line'] * rise
+        else:
+            total_length = ldesign['length']['v'] * body['_leg_length']
         self.base_len = total_length * ldesign['base_length_frac']['v']
         self.level_len = (total_length - self.base_len) / ldesign['num_levels']['v']
 
         # Add hip_line (== zero length)
-        self.base_len = body['hips_line'] * ldesign['rise']['v'] + self.base_len
-
+        self.base_len = body['hips_line'] * (
+            self.rise if measured is not None else ldesign['rise']['v']
+        ) + self.base_len
