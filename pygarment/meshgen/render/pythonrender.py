@@ -194,9 +194,16 @@ def load_meshes(paths:PathCofig, body_v, body_f):
     material.baseColorFactor = [1., 1., 1., 1.]
     material.doubleSided = True  # color both face sides  
     # NOTE remove transparency -- add white background just in case
-    white_back = Image.new('RGBA', material.baseColorTexture.size, color=(255, 255, 255, 255))
-    white_back.paste(material.baseColorTexture)
-    material.baseColorTexture = white_back.convert('RGB')  
+    base_color_texture = material.baseColorTexture
+    if base_color_texture is None and paths.easy_texture_path:
+        with Image.open(paths.easy_texture_path) as texture:
+            base_color_texture = texture.convert('RGBA')
+    if base_color_texture is not None:
+        white_back = Image.new(
+            'RGBA', base_color_texture.size, color=(255, 255, 255, 255)
+        )
+        white_back.paste(base_color_texture)
+        material.baseColorTexture = white_back.convert('RGB')
 
     garm_mesh.visual.material = material
 
@@ -220,4 +227,3 @@ def render_images(paths: PathCofig, body_v, body_f, render_props):
             render(pyrender_garm_mesh, pyrender_body_mesh, side, paths, render_props, renderer=renderer)
     finally:
         renderer.delete()
-

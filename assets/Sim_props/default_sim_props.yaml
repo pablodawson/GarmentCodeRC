@@ -2,7 +2,7 @@ sim:
   config:
     optimize_storage: true
 
-    max_sim_steps: 150
+    max_sim_steps: 400
     max_frame_time: 30
     max_meshgen_time: 60
     max_sim_time: 600

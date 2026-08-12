@@ -226,17 +226,9 @@ class Sleeve(pyg.Component):
         self.design = design
         self.body = body
         
-        if measurements is not None:
-            back_width = measurements['back_width']
-            if isinstance(back_width, dict):
-                back_width = back_width['v']
-            # In a measured Shirt the retained shoulder/upper-back span is a
-            # garment input, rather than being pinned to the body's balance.
-            # Keep a small shoulder projection so cut_corner never degenerates
-            # into a zero-length cut at the panel vertex.
-            sleeve_balance = float(back_width) / 2 - 0.5
-        else:
-            sleeve_balance = body['_base_sleeve_balance'] / 2
+        # This is the shoulder-joint anchor used to cut and place the armhole.
+        # Garment back width sizes the torso but must not move that body anchor.
+        sleeve_balance = body['_base_sleeve_balance'] / 2
 
         rest_angle = max(np.deg2rad(design['sleeve_angle']['v']),
                          np.deg2rad(body['_shoulder_incl']))
@@ -374,9 +366,18 @@ class Sleeve(pyg.Component):
             # UPD out interface!
             self.interfaces['out'] = self.cuff.interfaces['bottom']
 
-        # Final rotation of sleeve piece
+        # Final rotation of sleeve piece.
+        # Long sleeves follow the wearer arm axis when that angle is available;
+        # short sleeves keep the template's canonical starting orientation.
+        long_sleeve_lengths = {'above-elbow', 'elbow-length', 'three-quarter', 'full-length'}
+        sleeve_pose_angle = body['arm_pose_angle']
+        if (
+            design['length']['v'] in long_sleeve_lengths
+            and 'sleeve_arm_pose_angle' in body
+        ):
+            sleeve_pose_angle = body['sleeve_arm_pose_angle']
         self.rotate_by(R.from_euler(
-            'XYZ', [0, 0, body['arm_pose_angle']], degrees=True)) 
+            'XYZ', [0, 0, sleeve_pose_angle], degrees=True))
 
         # Set label 
         self.set_panel_label('arm')

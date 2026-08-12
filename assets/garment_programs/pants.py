@@ -1,4 +1,5 @@
 from copy import deepcopy
+import math
 import numpy as np
 
 import pygarment as pyg
@@ -30,8 +31,11 @@ class PantPanel(pyg.Panel):
         super().__init__(name)
 
         flare = body['leg_circ'] * (design['flare']['v']  - 1) / 4
-        opening_left = -float(bottom_width) / 2 if bottom_width is not None else -flare
-        opening_right = float(bottom_width) / 2 if bottom_width is not None else None
+        # PantPanel's x=0 axis is the outside seam, not the centre of the leg.
+        # Keep the measured opening on the inside of that seam so changing its
+        # width does not move the whole panel away from the body.
+        opening_left = 0.0 if bottom_width is not None else -flare
+        opening_right = float(bottom_width) if bottom_width is not None else None
         hips_depth = hips_depth * hipline_ext
 
         hip_side_incl = np.deg2rad(body['_hip_inclination'])
@@ -213,14 +217,16 @@ class PantsHalf(BaseBottoms):
         )
         waist, hips_depth, waist_back = self.eval_rise(self.rise)
 
+        measured_rise = None
+        waistband_height = 0.0
         if measured is not None:
             measured_rise = measurement_value(
                 full_design, 'measurement_pants', 'front_rise', None
             )
-            if measured_rise is not None:
-                hips_depth = max(
-                    0.1,
-                    measured_rise - body['crotch_hip_diff'],
+            if full_design['meta']['wb']['v']:
+                waistband_height = (
+                    full_design['waistband']['width']['v']
+                    * body['hips_line']
                 )
             design = deepcopy(design)
             design['crotch_drop']['v'] = 0.0
@@ -240,14 +246,32 @@ class PantsHalf(BaseBottoms):
         front_extention = front_hip / 4    # From pattern making book
         back_extention = crotch_extention - front_extention
 
+        if measured_rise is not None:
+            # GarmentIQ measures the straight chord from the top of the
+            # waistband to the crotch apex. PantPanel controls its vertical
+            # component, while front_extention supplies the horizontal one.
+            total_vertical_rise = math.sqrt(max(
+                0.0,
+                measured_rise ** 2 - front_extention ** 2,
+            ))
+            hips_depth = max(
+                0.1,
+                total_vertical_rise
+                - waistband_height
+                - body['crotch_hip_diff'],
+            )
+
         if measured is not None:
             length = max(
                 5.0,
                 measurement_value(
                     full_design, 'measurement_pants', 'full_length', 5.0,
-                ) - hips_depth,
+                ) - waistband_height - hips_depth,
             )
-            cuff_len = 0.0
+            cuff_len = (
+                design['cuff']['cuff_len']['v'] * body['_leg_length']
+                if design['cuff']['type']['v'] else 0.0
+            )
         else:
             length, cuff_len = design['length']['v'], design['cuff']['cuff_len']['v']
         if design['cuff']['type']['v']: 
